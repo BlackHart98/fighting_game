@@ -1,0 +1,1 @@
+./nob && ./build/fighting_game
