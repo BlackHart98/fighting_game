@@ -1,6 +1,10 @@
 #include "raylib.h"
 #include "../src/frames.h"
 
+#include <stdlib.h>
+
+// #define ABS(x) (0 > x)? -1 * x : x;
+
 enum ANIMATION_GROUP {
     IDLE=0, 
     START, 
@@ -50,8 +54,8 @@ typedef struct player_t {
     sprite_t sprite;
     int pos_idx;
     int vel_idx;
-    char player_state; // ACTIVE | INACTIVE
     float health_val;
+    char player_state; // ACTIVE | INACTIVE
 } player_t;
 
 
@@ -67,10 +71,10 @@ void
 draw_fn(versus_t *versus, Vector2 *pos, Vector2 *vel);
 
 void
-player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height);
+player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
 
 void
-ai_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height);
+ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
 
  
 int
@@ -141,13 +145,11 @@ main(void)
             .prev_anim_group = START,
         };
 
-        // Player 1
+        // Player 1:
         player_1 = (player_t) { .sprite = ryu_sprite, .pos_idx = 0, .vel_idx = 0, .player_state = 0, };
-        // Player 2
+        // Player 2:
         player_2 = (player_t) { .sprite = ryu_sprite, .pos_idx = 1, .vel_idx = 1, .player_state = 0, };
-
         versus_t vs = (versus_t){ .player = &(player_t[]){ player_1, player_2 }};
-
         SetTargetFPS(60); 
         while (!WindowShouldClose()) {
             float delta = GetFrameTime();
@@ -164,15 +166,12 @@ main(void)
 
 
 void
-player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height)
+player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
 {
     // Player Actions
     if (IsKeyDown(KEY_RIGHT) && player->player_state) {
         player->sprite.prev_anim_group = player->sprite.current_anim_group;
         player->sprite.current_anim_group = MOVE;
-
-        pos[player->pos_idx].x += vel[player->vel_idx].x;
-        if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
     }
     if (IsKeyDown(KEY_LEFT) && player->player_state) {
         player->sprite.prev_anim_group = player->sprite.current_anim_group;
@@ -202,15 +201,10 @@ player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, const int screen_
 
 
 void
-ai_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height)
+ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
 {
-    // Move and back-off
-    if (player->player_state){
-        player->sprite.prev_anim_group = player->sprite.current_anim_group;
-        player->sprite.current_anim_group = MOVE;
-
-        pos[player->pos_idx].x += vel[player->vel_idx].x;
-        if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
+    if (player->player_state) {
+        float distance = pos[0].x - pos[1].x;
     }
 }
 
@@ -219,9 +213,9 @@ void
 update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta)
 {
     // Player Actions
-    player_action_fn(&(versus->player[0]), pos, vel, screen_width, screen_height);
+    player_action_fn(&(versus->player[0]), pos, vel, delta, screen_width, screen_height);
     // AI Actions
-    ai_action_fn(&(versus->player[1]), pos, vel, screen_width, screen_height);
+    ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height);
     for (int i = 0; i < 2; i++) {
         switch (versus->player[i].sprite.current_anim_group){
             case IDLE: {
@@ -250,6 +244,8 @@ update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, 
             case MOVE: {
                 versus->player[i].sprite.move_anim.elapsed_time += delta;
                 float fps = 1 / versus->player[i].sprite.move_anim.frame_speed;
+                pos[versus->player[i].pos_idx].x += vel[versus->player[i].vel_idx].x;
+                        if (pos[versus->player[i].pos_idx].x >= screen_width - 50) pos[versus->player[i].pos_idx].x = screen_width - 50;
                 if (versus->player[i].sprite.move_anim.elapsed_time >= fps) {
                     versus->player[i].sprite.move_anim.elapsed_time = 0.0f;
                     versus->player[i].sprite.move_anim.current_frame++;
@@ -263,6 +259,8 @@ update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, 
             case BACKOFF: {
                 versus->player[i].sprite.backoff_anim.elapsed_time += delta;
                 float fps = 1 / versus->player[i].sprite.backoff_anim.frame_speed;
+                pos[versus->player[i].pos_idx].x -= vel[versus->player[i].vel_idx].x;
+                if (pos[versus->player[i].pos_idx].x <= 50) pos[versus->player[i].pos_idx].x = 50;
                 if (versus->player[i].sprite.backoff_anim.elapsed_time >= fps) {
                     versus->player[i].sprite.backoff_anim.elapsed_time = 0.0f;
                     versus->player[i].sprite.backoff_anim.current_frame++;
