@@ -129,7 +129,7 @@ main(void)
     Vector2 vel[] = {START_VELOCITY, START_VELOCITY};
 
     arena_allocator_t gpa = arena_allocator_init_page_default(c_allocator, MB(2));
-    InitWindow(screen_width, screen_height, "ryu animation");
+    InitWindow(screen_width, screen_height, "fighting game");
     {
         Texture2D texture = LoadTexture("assets/Ryu.gif");
 
@@ -320,13 +320,12 @@ load_player_assets_fn(
             .start_frame = 0,
             .frame_speed = ptr[i].frame_speed,
         };
-        ret = array_list_append_item_fn(allocator, &anim_arr, &anim);
+        ret = array_list_append_item_fn(allocator, &anim_arr, (char *)&anim);
         if (0 != ret) return;
     }
     *player = (player_t){
         .flip = flip,
         .health_val = 0.0f,
-        .player_state = 0,
         .player_state = 0,
         .pos_idx = pos_idx,
         .vel_idx = vel_idx,
