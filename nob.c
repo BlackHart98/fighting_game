@@ -36,6 +36,7 @@ main(int argc, char *argv[])
 #else
         static_assert(0, "Unsupported platform");
 #endif
+        nob_cmd_append(&cmd, "-fsanitize=address");
         nob_cc_inputs(&cmd, "externals/raylib6/lib/libraylib.a");
         nob_cc_inputs(&cmd, objects[i].src_file);
         nob_cc_output(&cmd, objects[i].build_file);

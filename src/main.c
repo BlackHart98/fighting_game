@@ -1,19 +1,20 @@
 #include "raylib.h"
 #include "../src/frames.h"
 
+#define WSA_IMPLEMENTATION
+#include "../src/why_so_arena.h"
+#define ARRAY_LIST_IMPLEMENTATION
+#include "../src/array_list.h"
+
+#include <stdio.h>
 #include <stdlib.h>
 
-// #define ABS(x) (0 > x)? -1 * x : x;
+#define FLIP_RIGHT      2
+#define FLIP_LEFT       1
+#define AI_MIN_DISTANCE 70 
 
-enum ANIMATION_GROUP {
-    IDLE=0, 
-    START, 
-    MOVE, 
-    BACKOFF, 
-    LEFT_RIGHT_HOOK, 
-    JAB,
-    LIGHT_KICK,
-    ROUNDHOUSE,
+enum CHARACTER {
+    RYU=0,
 };
 
 
@@ -22,31 +23,46 @@ enum ANIMATION_GROUP {
 #define START_VELOCITY (Vector2){4.0f, 0.0f}
 
 
-
 typedef struct animation_t {
     float       frame_speed;
     float       elapsed_time;
-    int         current_frame;
+
+    // ...
+    int         start_frame;
 
     // slice_t can hold this
     int         frame_count;
     Rectangle   *frame_rec; // []Rectangle
 } animation_t;
 
+typedef struct animation_desc_t {
+    int     current_anim;
+    int     next_anim;
+    float   move_sign;
+} animation_desc_t;
+
+
+animation_desc_t desc[] = {
+    [START]          = (animation_desc_t){.current_anim = START, .next_anim = IDLE, },
+    [IDLE]           = (animation_desc_t){.current_anim = IDLE, .next_anim = IDLE, },
+    [MOVE]           = (animation_desc_t){.current_anim = MOVE, .next_anim = IDLE, },
+    [BACKOFF]        = (animation_desc_t){.current_anim = BACKOFF, .next_anim = IDLE, },
+    [LEFT_RIGHT_HOOK]= (animation_desc_t){.current_anim = LEFT_RIGHT_HOOK, .next_anim = IDLE, },
+    [JAB]            = (animation_desc_t){.current_anim = JAB, .next_anim = IDLE, },
+    [LIGHT_KICK]     = (animation_desc_t){.current_anim = LIGHT_KICK, .next_anim = IDLE, },
+    [ROUNDHOUSE]     = (animation_desc_t){.current_anim = ROUNDHOUSE, .next_anim = IDLE, },
+};
+
 
 typedef struct sprite_t{
     Texture2D texture;
     int current_anim_group;
     int prev_anim_group;
+    int current_frame_idx;
 
     // Animations
-    animation_t idle_anim;
-    animation_t start_anim;
-    animation_t move_anim;
-    animation_t backoff_anim;
-    animation_t punch_anim;
-    animation_t light_kick_anim;
-    animation_t roundhouse_anim;
+    int anim_count;
+    animation_t *anim;
 } sprite_t;
 
 
@@ -55,6 +71,7 @@ typedef struct player_t {
     int pos_idx;
     int vel_idx;
     float health_val;
+    char flip; // LEFT | RIGHT
     char player_state; // ACTIVE | INACTIVE
 } player_t;
 
@@ -63,6 +80,13 @@ typedef struct versus_t {
     player_t *player;
 } versus_t;
 
+
+void
+load_player_assets_fn(arena_allocator_t *allocator, player_t *player, int pos_idx, int vel_idx, Texture2D *texture, slice_t *frame_list, char flip);
+
+
+void
+compute_frame_orientation_fn(animation_t* animation, int current_frame, char flip);
 
 void
 update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta);
@@ -76,6 +100,14 @@ player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, cons
 void
 ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
 
+
+void
+draw_character_fn(player_t *player, Vector2 *pos, Vector2 *vel, int current_anim_group);
+
+
+void
+player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
+
  
 int
 main(void)
@@ -86,70 +118,17 @@ main(void)
     player_t player_2 = {0};
     Vector2 pos[] = {START_POSITION_PLAYER_1, START_POSITION_PLAYER_2};
     Vector2 vel[] = {START_VELOCITY, START_VELOCITY};
+
+    arena_allocator_t gpa = arena_allocator_init_page_default(c_allocator, MB(2));
     InitWindow(screen_width, screen_height, "ryu animation");
     {
-        Texture2D ryu_texture = LoadTexture("assets/Ryu.gif");
-        sprite_t ryu_sprite = (sprite_t){
-            .start_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_start_frame,
-                .frame_speed = 8.0f,
-                .frame_count = 9,
-                .elapsed_time = 0.0f,
-            },
-            .idle_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_idle_frame,
-                .frame_speed = 10.0f,
-                .frame_count = 6,
-                .elapsed_time = 0.0f,
-            },
-            .move_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_move_frame,
-                .frame_speed = 15.0f,
-                .frame_count = 6,
-                .elapsed_time = 0.0f,
-            },
-            .backoff_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_backoff_frame,
-                .frame_speed = 15.0f,
-                .frame_count = 6,
-                .elapsed_time = 0.0f,
-            },
-            .punch_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_punch_frame,
-                .frame_speed = 15.0f,
-                .frame_count = 9,
-                .elapsed_time = 0.0f,
-            },
-            .light_kick_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_kick_frame,
-                .frame_speed = 15.0f,
-                .frame_count = 6,
-                .elapsed_time = 0.0f,
-            },
-            .roundhouse_anim = (animation_t){
-                .current_frame = 0,
-                .frame_rec = ryu_roundhouse_frame,
-                .frame_speed = 15.0f,
-                .frame_count = 5,
-                .elapsed_time = 0.0f,
-            },
+        Texture2D texture = LoadTexture("assets/Ryu.gif");
 
-            .texture = ryu_texture,
-            .current_anim_group = START,
-            .prev_anim_group = START,
-        };
+        slice_t frames_slice = make_slice(ryu_frames, sizeof(ryu_frames));
+        load_player_assets_fn(&gpa, &player_1, 0, 0, &texture, &frames_slice, FLIP_RIGHT);
+        load_player_assets_fn(&gpa, &player_2, 1, 1, &texture, &frames_slice, FLIP_LEFT);
 
-        // Player 1:
-        player_1 = (player_t) { .sprite = ryu_sprite, .pos_idx = 0, .vel_idx = 0, .player_state = 0, };
-        // Player 2:
-        player_2 = (player_t) { .sprite = ryu_sprite, .pos_idx = 1, .vel_idx = 1, .player_state = 0, };
-        versus_t vs = (versus_t){ .player = &(player_t[]){ player_1, player_2 }};
+        versus_t vs = (versus_t){ .player = (player_t[]){ player_1, player_2 }};
         SetTargetFPS(60); 
         while (!WindowShouldClose()) {
             float delta = GetFrameTime();
@@ -158,9 +137,10 @@ main(void)
             // Render
             draw_fn(&vs, pos, vel);       
         }
-        UnloadTexture(ryu_texture);
+        UnloadTexture(texture);
     }
     CloseWindow();
+    arena_allocator_deinit(&gpa);
     return 0;
 }
 
@@ -205,6 +185,13 @@ ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, f
 {
     if (player->player_state) {
         float distance = pos[0].x - pos[1].x;
+        // move towards player:
+        if (-70 > distance) {
+            player->sprite.current_anim_group = BACKOFF; // should be move
+        }  
+        if (70 < distance){
+            player->sprite.current_anim_group = MOVE; // should be backoff
+        }
     }
 }
 
@@ -214,121 +201,10 @@ update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, 
 {
     // Player Actions
     player_action_fn(&(versus->player[0]), pos, vel, delta, screen_width, screen_height);
-    // AI Actions
-    ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height);
+    // // AI Actions
+    // ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height); 
     for (int i = 0; i < 2; i++) {
-        switch (versus->player[i].sprite.current_anim_group){
-            case IDLE: {
-                versus->player[i].sprite.idle_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.idle_anim.frame_speed;
-                if (versus->player[i].sprite.idle_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.idle_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.idle_anim.current_frame++;
-                    if (versus->player[i].sprite.idle_anim.current_frame >= versus->player[i].sprite.idle_anim.frame_count) versus->player[i].sprite.idle_anim.current_frame = 0;
-                }
-                break;
-            }
-            case START: {
-                versus->player[i].sprite.start_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.start_anim.frame_speed;
-                if (versus->player[i].sprite.start_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.start_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.start_anim.current_frame++;
-                    if (versus->player[i].sprite.start_anim.current_frame >= versus->player[i].sprite.start_anim.frame_count) {
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                        versus->player[i].player_state = 1;
-                    }
-                }
-                break;
-            }
-            case MOVE: {
-                versus->player[i].sprite.move_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.move_anim.frame_speed;
-                pos[versus->player[i].pos_idx].x += vel[versus->player[i].vel_idx].x;
-                        if (pos[versus->player[i].pos_idx].x >= screen_width - 50) pos[versus->player[i].pos_idx].x = screen_width - 50;
-                if (versus->player[i].sprite.move_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.move_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.move_anim.current_frame++;
-                    if (versus->player[i].sprite.move_anim.current_frame >= versus->player[i].sprite.move_anim.frame_count) {
-                        versus->player[i].sprite.move_anim.current_frame = 0;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-            case BACKOFF: {
-                versus->player[i].sprite.backoff_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.backoff_anim.frame_speed;
-                pos[versus->player[i].pos_idx].x -= vel[versus->player[i].vel_idx].x;
-                if (pos[versus->player[i].pos_idx].x <= 50) pos[versus->player[i].pos_idx].x = 50;
-                if (versus->player[i].sprite.backoff_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.backoff_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.backoff_anim.current_frame++;
-                    if (versus->player[i].sprite.backoff_anim.current_frame >= versus->player[i].sprite.backoff_anim.frame_count) {
-                        versus->player[i].sprite.backoff_anim.current_frame = 0;
-                        versus->player[i].sprite.prev_anim_group = versus->player[i].sprite.current_anim_group;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-            case JAB: {
-                versus->player[i].sprite.punch_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.punch_anim.frame_speed;
-                if (versus->player[i].sprite.punch_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.punch_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.punch_anim.current_frame++;
-                    if (versus->player[i].sprite.punch_anim.current_frame >= 3) {
-                        versus->player[i].sprite.punch_anim.current_frame = 3;
-                        versus->player[i].sprite.prev_anim_group = versus->player[i].sprite.current_anim_group;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-            case LEFT_RIGHT_HOOK: {
-                versus->player[i].sprite.punch_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.punch_anim.frame_speed;
-                if (versus->player[i].sprite.punch_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.punch_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.punch_anim.current_frame++;
-                    if (versus->player[i].sprite.punch_anim.current_frame >= versus->player[i].sprite.punch_anim.frame_count) {
-                        versus->player[i].sprite.punch_anim.current_frame = 0;
-                        versus->player[i].sprite.prev_anim_group = versus->player[i].sprite.current_anim_group;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-            case LIGHT_KICK: {
-                versus->player[i].sprite.light_kick_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.light_kick_anim.frame_speed;
-                if (versus->player[i].sprite.light_kick_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.light_kick_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.light_kick_anim.current_frame++;
-                    if (versus->player[i].sprite.light_kick_anim.current_frame >= versus->player[i].sprite.light_kick_anim.frame_count) {
-                        versus->player[i].sprite.light_kick_anim.current_frame = 0;
-                        versus->player[i].sprite.prev_anim_group = versus->player[i].sprite.current_anim_group;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-            case ROUNDHOUSE: {
-                versus->player[i].sprite.roundhouse_anim.elapsed_time += delta;
-                float fps = 1 / versus->player[i].sprite.roundhouse_anim.frame_speed;
-                if (versus->player[i].sprite.roundhouse_anim.elapsed_time >= fps) {
-                    versus->player[i].sprite.roundhouse_anim.elapsed_time = 0.0f;
-                    versus->player[i].sprite.roundhouse_anim.current_frame++;
-                    if (versus->player[i].sprite.roundhouse_anim.current_frame >= versus->player[i].sprite.roundhouse_anim.frame_count) {
-                        versus->player[i].sprite.roundhouse_anim.current_frame = 0;
-                        versus->player[i].sprite.prev_anim_group = versus->player[i].sprite.current_anim_group;
-                        versus->player[i].sprite.current_anim_group = IDLE;
-                    }
-                }
-                break;
-            }
-        }
+        player_tick_fn(&(versus->player[i]), pos, vel, delta, screen_width, screen_height);
     }
 }
 
@@ -340,65 +216,124 @@ draw_fn(versus_t *versus, Vector2 *pos, Vector2 *vel)
     {
         ClearBackground(RAYWHITE);
         for (int i = 0; i < 2; i++) {
-            switch (versus->player[i].sprite.current_anim_group){
-                case IDLE: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.idle_anim.frame_rec[versus->player[i].sprite.idle_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case START: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.start_anim.frame_rec[versus->player[i].sprite.start_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case MOVE: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.move_anim.frame_rec[versus->player[i].sprite.move_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case BACKOFF: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.backoff_anim.frame_rec[versus->player[i].sprite.backoff_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case JAB: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.punch_anim.frame_rec[versus->player[i].sprite.punch_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case LEFT_RIGHT_HOOK: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.punch_anim.frame_rec[versus->player[i].sprite.punch_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case LIGHT_KICK: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.light_kick_anim.frame_rec[versus->player[i].sprite.light_kick_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
-                case ROUNDHOUSE: {
-                    DrawTextureRec(
-                        versus->player[i].sprite.texture, 
-                        versus->player[i].sprite.roundhouse_anim.frame_rec[versus->player[i].sprite.roundhouse_anim.current_frame], 
-                        pos[versus->player[i].pos_idx], WHITE);
-                    break;
-                }
+            // draw_character_fn(&(versus->player[i]), pos, vel, versus->player[i].sprite.current_anim_group);
+            int anim_group = versus->player[i].sprite.current_anim_group;
+            DrawTextureRec(
+                versus->player[i].sprite.texture, 
+                versus->player[i].sprite.anim[anim_group].frame_rec[versus->player[i].sprite.current_frame_idx], 
+                pos[versus->player[i].pos_idx], WHITE);
+            }
+    }
+    EndDrawing(); 
+}
+
+
+
+void
+compute_frame_orientation_fn(animation_t* animation, int current_frame, char flip)
+{
+    switch (flip){
+        case FLIP_LEFT: {
+            if (0 <= animation->frame_rec[current_frame].width) {
+                animation->frame_rec[current_frame].width *= -1.0f;
+            }
+            break;
+        }
+        case FLIP_RIGHT: {
+            if (0 > animation->frame_rec[current_frame].width) {
+                animation->frame_rec[current_frame].width *= -1.0f;
+            }
+            break;
+        }
+    }
+
+}
+
+
+void
+draw_character_fn(player_t *player, Vector2 *pos, Vector2 *vel, int current_anim_group)
+{
+    int anim_group = player->sprite.current_anim_group;
+    DrawTextureRec(
+        player->sprite.texture, 
+        player->sprite.anim[anim_group].frame_rec[player->sprite.current_frame_idx], 
+        pos[player->pos_idx], WHITE);
+}
+
+
+void
+player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
+{
+    int anim_group = player->sprite.current_anim_group;
+    player->sprite.anim[anim_group].elapsed_time += delta;
+    float fps = 1 / player->sprite.anim[anim_group].frame_speed;
+
+    if (player->sprite.anim[anim_group].elapsed_time >= fps) {
+        if (BACKOFF == anim_group || MOVE == anim_group){
+
+        } else {
+            player->sprite.anim[anim_group].elapsed_time = 0.0f;
+            player->sprite.current_frame_idx++;
+            if (player->sprite.current_frame_idx >= player->sprite.anim[anim_group].frame_count) {
+                player->sprite.current_frame_idx = 0;
+                player->sprite.current_anim_group = desc[anim_group].next_anim;
             }
         }
     }
-    EndDrawing(); 
+    compute_frame_orientation_fn(&(player->sprite.anim[anim_group]), player->sprite.current_frame_idx, player->flip);
+}
+
+
+void
+load_player_assets_fn(
+    arena_allocator_t *allocator, 
+    player_t *player, 
+    int pos_idx, 
+    int vel_idx, 
+    Texture2D *texture, 
+    slice_t *frame_list, 
+    char flip)
+{
+    size_t len = (size_t)(frame_list->len_in_bytes / sizeof(frame_rec_slice_t));
+    frame_rec_slice_t *ptr = (frame_rec_slice_t *) frame_list->ptr;
+    int ret = 0;
+
+    array_list_t anim_arr = array_list_init_capacity(allocator, animation_t, len);
+    if (0 != ret) return;
+    for (int i = 0; i < (int)len; i++) {
+        printf("length: %d\n", ptr[i].len);
+        array_list_t temp_arr = array_list_init_capacity(allocator, Rectangle, ptr[i].len);
+        ret = array_list_append_slice_fn(
+            allocator, &temp_arr, 
+            (slice_t){ 
+                .ptr = ptr[i].frame_rec, 
+                .len_in_bytes = (sizeof(Rectangle) * ptr[i].len) });
+        if (0 != ret) return;
+        animation_t anim = (animation_t){
+            .elapsed_time = 0.0f,
+            .frame_count = (int)ptr[i].len,
+            .frame_rec = (Rectangle *) temp_arr.ptr,
+            .start_frame = 0,
+            .frame_speed = ptr[i].frame_speed,
+        };
+        ret = array_list_append_item_fn(allocator, &anim_arr, &anim);
+        if (0 != ret) return;
+    }
+    *player = (player_t){
+        .flip = flip,
+        .health_val = 0.0f,
+        .player_state = 0,
+        .player_state = 0,
+        .pos_idx = pos_idx,
+        .vel_idx = vel_idx,
+        .sprite = (sprite_t) {
+            .anim = (animation_t *) anim_arr.ptr,
+            .anim_count = (int)len,
+            .current_anim_group = START,
+            .prev_anim_group = START,
+            .current_frame_idx = 0,
+            .texture = *texture,
+        },
+    };
+    printf("=================\n");
 }
