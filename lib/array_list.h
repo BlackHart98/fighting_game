@@ -2,7 +2,7 @@
 #define ARRAY_LIST_H
 
 #include <assert.h>
-#include "../src/why_so_arena.h"
+#include "../lib/why_so_arena.h"
 
 #define ARRAY_LIST_LOCAL static
 

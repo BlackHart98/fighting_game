@@ -1,10 +1,12 @@
 #include "raylib.h"
+
+// Frames will be re-written as a frame generator module
 #include "../src/frames.h"
 
 #define WSA_IMPLEMENTATION
-#include "../src/why_so_arena.h"
+#include "../lib/why_so_arena.h"
 #define ARRAY_LIST_IMPLEMENTATION
-#include "../src/array_list.h"
+#include "../lib/array_list.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +55,13 @@ animation_desc_t desc[] = {
     [ROUNDHOUSE]     = (animation_desc_t){.current_anim = ROUNDHOUSE, .next_anim = IDLE, },
 };
 
+
+typedef struct player_asset_t {
+    char* audio_file;
+    char* texture_file;
+    char* frames_file;
+    int character; 
+} player_asset_t;
 
 typedef struct sprite_t{
     Texture2D texture;
@@ -201,8 +210,8 @@ update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, 
 {
     // Player Actions
     player_action_fn(&(versus->player[0]), pos, vel, delta, screen_width, screen_height);
-    // // AI Actions
-    // ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height); 
+    // AI Actions
+    ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height); 
     for (int i = 0; i < 2; i++) {
         player_tick_fn(&(versus->player[i]), pos, vel, delta, screen_width, screen_height);
     }
@@ -216,13 +225,8 @@ draw_fn(versus_t *versus, Vector2 *pos, Vector2 *vel)
     {
         ClearBackground(RAYWHITE);
         for (int i = 0; i < 2; i++) {
-            // draw_character_fn(&(versus->player[i]), pos, vel, versus->player[i].sprite.current_anim_group);
-            int anim_group = versus->player[i].sprite.current_anim_group;
-            DrawTextureRec(
-                versus->player[i].sprite.texture, 
-                versus->player[i].sprite.anim[anim_group].frame_rec[versus->player[i].sprite.current_frame_idx], 
-                pos[versus->player[i].pos_idx], WHITE);
-            }
+            draw_character_fn(&(versus->player[i]), pos, vel, versus->player[i].sprite.current_anim_group);
+        }
     }
     EndDrawing(); 
 }
@@ -269,6 +273,7 @@ player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const 
     float fps = 1 / player->sprite.anim[anim_group].frame_speed;
 
     if (player->sprite.anim[anim_group].elapsed_time >= fps) {
+        // I have to reprogram move and backoff
         if (BACKOFF == anim_group || MOVE == anim_group){
 
         } else {
@@ -301,7 +306,6 @@ load_player_assets_fn(
     array_list_t anim_arr = array_list_init_capacity(allocator, animation_t, len);
     if (0 != ret) return;
     for (int i = 0; i < (int)len; i++) {
-        printf("length: %d\n", ptr[i].len);
         array_list_t temp_arr = array_list_init_capacity(allocator, Rectangle, ptr[i].len);
         ret = array_list_append_slice_fn(
             allocator, &temp_arr, 
@@ -335,5 +339,4 @@ load_player_assets_fn(
             .texture = *texture,
         },
     };
-    printf("=================\n");
 }
