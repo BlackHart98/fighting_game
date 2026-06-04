@@ -19,7 +19,7 @@ enum CHARACTER {
     RYU=0,
 };
 
-
+#define ABS(x) (0 > x)? (-1 * x) : x 
 #define START_POSITION_PLAYER_1 (Vector2){50, 50}
 #define START_POSITION_PLAYER_2 (Vector2){200, 50}
 #define START_VELOCITY (Vector2){4.0f, 0.0f}
@@ -201,12 +201,8 @@ ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, f
     if (player->player_state) {
         float distance = pos[0].x - pos[1].x;
         // move towards player:
-        if (-75 > distance) {
-            player->sprite.current_anim_group = MOVE;
-        }  
-        if (75 < distance){
-            player->sprite.current_anim_group = MOVE;
-        }
+        if (-75 > distance) player->sprite.current_anim_group = MOVE;
+        if (75 < distance) player->sprite.current_anim_group = MOVE;
     }
 }
 
@@ -214,6 +210,7 @@ ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, f
 void
 update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta)
 {
+    // Fix issues with orientation
     // Player Actions
     player_action_fn(&(versus->player[0]), pos, vel, delta, screen_width, screen_height);
     // AI Actions
