@@ -31,6 +31,7 @@ typedef struct animation_t {
 
     // ...
     int         start_frame;
+    int         current_frame_idx;
 
     // slice_t can hold this
     int         frame_count;
@@ -67,7 +68,6 @@ typedef struct sprite_t{
     Texture2D texture;
     int current_anim_group;
     int prev_anim_group;
-    int current_frame_idx;
 
     // Animations
     int anim_count;
@@ -94,8 +94,11 @@ void
 load_player_assets_fn(arena_allocator_t *allocator, player_t *player, int pos_idx, int vel_idx, Texture2D *texture, slice_t *frame_list, char flip);
 
 
+// void
+// compute_frame_orientation_fn(animation_t* animation, int current_frame, char flip);
+
 void
-compute_frame_orientation_fn(animation_t* animation, int current_frame, char flip);
+compute_frame_orientation_fn(player_t *player);
 
 void
 update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta);
@@ -149,6 +152,9 @@ main(void)
         UnloadTexture(texture);
     }
     CloseWindow();
+
+    // garbage collection
+    arena_allocator_reset(&gpa);
     arena_allocator_deinit(&gpa);
     return 0;
 }
@@ -158,33 +164,33 @@ void
 player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
 {
     // Player Actions
-    if (IsKeyDown(KEY_RIGHT) && player->player_state) {
-        player->sprite.prev_anim_group = player->sprite.current_anim_group;
-        player->sprite.current_anim_group = MOVE;
-    }
-    if (IsKeyDown(KEY_LEFT) && player->player_state) {
-        player->sprite.prev_anim_group = player->sprite.current_anim_group;
-        player->sprite.current_anim_group = BACKOFF;
-
-        pos[player->pos_idx].x -= vel[player->vel_idx].x;
-        if (pos[player->pos_idx].x <= 50) pos[player->pos_idx].x = 50;
-    }
-    if (IsKeyPressed(KEY_P) && player->player_state) {
-        if (JAB == player->sprite.prev_anim_group){
+    if (player->player_state){
+        if (IsKeyDown(KEY_RIGHT)) {
             player->sprite.prev_anim_group = player->sprite.current_anim_group;
-            player->sprite.current_anim_group = LEFT_RIGHT_HOOK;
-        } else {
+            if (player->flip == FLIP_RIGHT) player->sprite.current_anim_group = MOVE;
+            else player->sprite.current_anim_group = BACKOFF;
+        }
+        if (IsKeyDown(KEY_LEFT)) {
+            player->sprite.prev_anim_group = player->sprite.current_anim_group;
+            if (player->flip == FLIP_RIGHT) player->sprite.current_anim_group = BACKOFF;
+            else player->sprite.current_anim_group = MOVE;
+        }
+        if (IsKeyPressed(KEY_P)) {
             player->sprite.prev_anim_group = player->sprite.current_anim_group;
             player->sprite.current_anim_group = JAB;
         }
-    }
-    if (IsKeyDown(KEY_K) && player->player_state) {
-        player->sprite.prev_anim_group = player->sprite.current_anim_group;
-        player->sprite.current_anim_group = LIGHT_KICK;
-    }
-    if (IsKeyDown(KEY_R) && player->player_state) {
-        player->sprite.prev_anim_group = player->sprite.current_anim_group;
-        player->sprite.current_anim_group = ROUNDHOUSE;
+        if (IsKeyPressed(KEY_H)) {
+            player->sprite.prev_anim_group = player->sprite.current_anim_group;
+            player->sprite.current_anim_group = LEFT_RIGHT_HOOK;
+        }
+        if (IsKeyDown(KEY_K)) {
+            player->sprite.prev_anim_group = player->sprite.current_anim_group;
+            player->sprite.current_anim_group = LIGHT_KICK;
+        }
+        if (IsKeyDown(KEY_R)) {
+            player->sprite.prev_anim_group = player->sprite.current_anim_group;
+            player->sprite.current_anim_group = ROUNDHOUSE;
+        }
     }
 }
 
@@ -195,11 +201,11 @@ ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, f
     if (player->player_state) {
         float distance = pos[0].x - pos[1].x;
         // move towards player:
-        if (-70 > distance) {
-            player->sprite.current_anim_group = BACKOFF; // should be move
+        if (-75 > distance) {
+            player->sprite.current_anim_group = MOVE;
         }  
-        if (70 < distance){
-            player->sprite.current_anim_group = MOVE; // should be backoff
+        if (75 < distance){
+            player->sprite.current_anim_group = MOVE;
         }
     }
 }
@@ -212,6 +218,16 @@ update_fn(versus_t *versus, Vector2 *pos, Vector2 *vel, const int screen_width, 
     player_action_fn(&(versus->player[0]), pos, vel, delta, screen_width, screen_height);
     // AI Actions
     ai_action_fn(&(versus->player[1]), &(versus->player[0]), pos, vel, delta, screen_width, screen_height); 
+
+    if (FLIP_RIGHT == versus->player[0].flip && (pos[versus->player[0].pos_idx].x > pos[versus->player[1].pos_idx].x + 50)) {
+        char flip = versus->player[0].flip;
+        versus->player[0].flip = versus->player[1].flip;
+        versus->player[1].flip = flip;
+    } else if (FLIP_RIGHT == versus->player[1].flip && (pos[versus->player[1].pos_idx].x > pos[versus->player[0].pos_idx].x + 50)) {
+        char flip = versus->player[0].flip;
+        versus->player[0].flip = versus->player[1].flip;
+        versus->player[1].flip = flip;
+    }
     for (int i = 0; i < 2; i++) {
         player_tick_fn(&(versus->player[i]), pos, vel, delta, screen_width, screen_height);
     }
@@ -234,23 +250,24 @@ draw_fn(versus_t *versus, Vector2 *pos, Vector2 *vel)
 
 
 void
-compute_frame_orientation_fn(animation_t* animation, int current_frame, char flip)
+compute_frame_orientation_fn(player_t *player)
 {
-    switch (flip){
+    int anim_group = player->sprite.current_anim_group;
+    int current_frame = player->sprite.anim[anim_group].current_frame_idx;
+    switch (player->flip){
         case FLIP_LEFT: {
-            if (0 <= animation->frame_rec[current_frame].width) {
-                animation->frame_rec[current_frame].width *= -1.0f;
+            if (0 <= player->sprite.anim[anim_group].frame_rec[current_frame].width) {
+                player->sprite.anim[anim_group].frame_rec[current_frame].width *= -1.0f;
             }
             break;
         }
         case FLIP_RIGHT: {
-            if (0 > animation->frame_rec[current_frame].width) {
-                animation->frame_rec[current_frame].width *= -1.0f;
+            if (0 > player->sprite.anim[anim_group].frame_rec[current_frame].width) {
+                player->sprite.anim[anim_group].frame_rec[current_frame].width *= -1.0f;
             }
             break;
         }
     }
-
 }
 
 
@@ -260,7 +277,7 @@ draw_character_fn(player_t *player, Vector2 *pos, Vector2 *vel, int current_anim
     int anim_group = player->sprite.current_anim_group;
     DrawTextureRec(
         player->sprite.texture, 
-        player->sprite.anim[anim_group].frame_rec[player->sprite.current_frame_idx], 
+        player->sprite.anim[anim_group].frame_rec[player->sprite.anim[anim_group].current_frame_idx], 
         pos[player->pos_idx], WHITE);
 }
 
@@ -271,21 +288,40 @@ player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const 
     int anim_group = player->sprite.current_anim_group;
     player->sprite.anim[anim_group].elapsed_time += delta;
     float fps = 1 / player->sprite.anim[anim_group].frame_speed;
-
-    if (player->sprite.anim[anim_group].elapsed_time >= fps) {
-        // I have to reprogram move and backoff
-        if (BACKOFF == anim_group || MOVE == anim_group){
-
-        } else {
-            player->sprite.anim[anim_group].elapsed_time = 0.0f;
-            player->sprite.current_frame_idx++;
-            if (player->sprite.current_frame_idx >= player->sprite.anim[anim_group].frame_count) {
-                player->sprite.current_frame_idx = 0;
-                player->sprite.current_anim_group = desc[anim_group].next_anim;
+    
+    switch (anim_group) {
+        case MOVE: {
+            if (player->flip == FLIP_RIGHT){
+                pos[player->pos_idx].x += vel[player->vel_idx].x;
+                if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
+            } else {
+                pos[player->pos_idx].x -= vel[player->vel_idx].x;
+                if (pos[player->pos_idx].x <= 50) pos[player->pos_idx].x = 50;
             }
+            break;
+        } 
+        case BACKOFF: {
+            if (player->flip == FLIP_RIGHT){
+                pos[player->pos_idx].x -= vel[player->vel_idx].x;
+                if (pos[player->pos_idx].x <= 50) pos[player->pos_idx].x = 50;
+            } else {
+                pos[player->pos_idx].x += vel[player->vel_idx].x;
+                if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
+            }
+            break;
         }
     }
-    compute_frame_orientation_fn(&(player->sprite.anim[anim_group]), player->sprite.current_frame_idx, player->flip);
+    if (player->sprite.anim[anim_group].elapsed_time >= fps) {
+        player->sprite.anim[anim_group].elapsed_time = 0.0f;
+        player->sprite.anim[anim_group].current_frame_idx++;
+        if (player->sprite.anim[anim_group].current_frame_idx >= player->sprite.anim[anim_group].frame_count) {
+            player->sprite.anim[anim_group].current_frame_idx = 0;
+            player->sprite.prev_anim_group = player->sprite.current_anim_group;
+            player->sprite.current_anim_group = desc[anim_group].next_anim;
+            player->player_state = 1;
+        }
+    }
+    compute_frame_orientation_fn(player);
 }
 
 
@@ -319,6 +355,7 @@ load_player_assets_fn(
             .frame_rec = (Rectangle *) temp_arr.ptr,
             .start_frame = 0,
             .frame_speed = ptr[i].frame_speed,
+            .current_frame_idx = 0,
         };
         ret = array_list_append_item_fn(allocator, &anim_arr, (char *)&anim);
         if (0 != ret) return;
@@ -334,7 +371,6 @@ load_player_assets_fn(
             .anim_count = (int)len,
             .current_anim_group = START,
             .prev_anim_group = START,
-            .current_frame_idx = 0,
             .texture = *texture,
         },
     };
