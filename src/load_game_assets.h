@@ -6,6 +6,7 @@
 #include "../src/frames.h"
 #include "../lib/why_so_arena.h"
 #include "../lib/array_list.h"
+#include "../src/physics.h"
 
 #define FLIP_RIGHT      2
 #define FLIP_LEFT       1
@@ -13,6 +14,10 @@
 
 enum CHARACTER {
     RYU=0,
+};
+
+enum INPUT_TYPE {
+    PLAYER, AI
 };
 
 #define ABS(x) (0 > x)? (-1 * x) : x 
@@ -74,26 +79,46 @@ typedef struct sprite_t{
 
 typedef struct player_t {
     sprite_t sprite;
+    int character;
+    int player_input;
+    int input_type;
     int pos_idx;
-    int vel_idx;
     float health_val;
     char flip; // FLIP_LEFT | FLIP_RIGHT
     char player_state; // ACTIVE | INACTIVE
 } player_t;
 
 
+typedef struct player_selector_t {
+    int character;
+    int player_input;
+} player_selector_t;
+
+
+typedef struct enviroment_selector_t {
+    int env_1;
+} enviroment_selector_t;
+
+
+typedef struct selector_t {
+    player_selector_t player_1;
+    player_selector_t player_2;
+    struct {
+        int env;
+    }  environment;
+} selector_t;
+
+
 typedef struct ground_t {
 #ifdef HAS_TEXTURE
     sprite_t sprite;
-#else
-    int   height;
-    int   width;
 #endif
     int pos_idx;
 } ground_t;
 
 typedef struct game_object_t {
-    player_t *player;
+    player_t player_1;
+    player_t player_2;
     ground_t ground;
 } game_object_t;
 
@@ -102,15 +127,25 @@ void
 load_player_assets_fn(
     arena_allocator_t *allocator, 
     player_t *player, 
-    int pos_idx, 
-    int vel_idx, 
+    player_selector_t *selector,
+    position_soa_t *position,
+    int pos_idx,
     Texture2D *texture, 
     slice_t *frame_list, 
     char flip);
 
 void
-load_ground_assets_fn(ground_t *ground, int pos_idx, const int screen_width, const int screen_height);
+load_ground_assets_fn(ground_t *ground, int pos_idx);
 
+
+void
+load_game_assets_fn(
+    arena_allocator_t *allocator, 
+    game_object_t *game_obj, 
+    position_soa_t *position,
+    const selector_t *selector,
+    const int screen_width, 
+    const int screen_height);
 
 
 
@@ -118,8 +153,9 @@ void
 load_player_assets_fn(
     arena_allocator_t *allocator, 
     player_t *player, 
-    int pos_idx, 
-    int vel_idx, 
+    player_selector_t *selector,
+    position_soa_t *position,
+    int pos_idx,
     Texture2D *texture, 
     slice_t *frame_list, 
     char flip)
@@ -154,7 +190,8 @@ load_player_assets_fn(
         .health_val = 0.0f,
         .player_state = 0,
         .pos_idx = pos_idx,
-        .vel_idx = vel_idx,
+        .character = selector->character,
+        .input_type = selector->player_input,
         .sprite = (sprite_t) {
             .anim = (animation_t *) anim_arr.ptr,
             .anim_count = (int)len,
@@ -167,12 +204,81 @@ load_player_assets_fn(
 
 
 void
-load_ground_assets_fn(ground_t *ground, int pos_idx, const int screen_width, const int screen_height)
+load_ground_assets_fn(ground_t *ground, int pos_idx)
 {
-    *ground = (ground_t){
-        .pos_idx = pos_idx,
-        .height = 50,
-        .width = screen_width,
-    };
+    *ground = (ground_t){ .pos_idx = pos_idx, };
+}
+
+
+
+void
+load_game_assets_fn(
+    arena_allocator_t *allocator, 
+    game_object_t *game_obj, 
+    position_soa_t *position,
+    const selector_t *selector,
+    const int screen_width, 
+    const int screen_height)
+{
+    player_t player_1 = {0};
+    player_t player_2 = {0};
+    ground_t ground = {0};
+
+    int ret = position_soa_append_item_fn(
+        allocator, position, 
+        (position_t){ 
+            .x_pos = 0, .y_pos = screen_height - 20, .z_pos = 0, 
+            .x_vel = 0, .y_vel = 0, 
+            .width = screen_width, .height = screen_height - 20,
+        });
+    load_ground_assets_fn(&ground, (position->len - 1));
+    
+    // Player 1 and 2
+    player_selector_t play_select[] = {selector->player_1, selector->player_2};
+    slice_t frames_slice[] = {(slice_t){0}, (slice_t){0}};
+    Texture2D texture[] = {(Texture2D){0}, (Texture2D){0}};
+    Rectangle rect[] = {(Rectangle){0}, (Rectangle){0}};
+    for (int i = 0; i < 2; i++){
+        switch (play_select[i].character) {
+            case RYU:
+                frames_slice[i] = make_slice(ryu_frames, sizeof(ryu_frames));
+                texture[i] = LoadTexture("assets/Ryu.gif");
+                rect[i].width = 100;
+                rect[i].height = 200;
+                break;
+        }
+    }
+
+    ret = position_soa_append_item_fn(
+        allocator, position, 
+        (position_t){ 
+            .x_pos = 50, .y_pos = position->height[ground.pos_idx] - rect[1].height, .z_pos = 0, 
+            .x_vel = 4, .y_vel = 0, 
+            .width = rect[0].width, .height = rect[0].height,
+        });
+    load_player_assets_fn(
+        allocator, 
+        &player_1, 
+        &selector->player_1, 
+        position, 
+        (position->len - 1), &texture[0], &frames_slice[0], FLIP_RIGHT);
+    
+    ret = position_soa_append_item_fn(
+        allocator, position, 
+        (position_t){ 
+            .x_pos = screen_width - 100, .y_pos = position->height[ground.pos_idx] - rect[1].height, .z_pos = 0, 
+            .x_vel = 4, .y_vel = 0, 
+            .width = rect[1].width, .height = rect[1].height,
+        });
+    load_player_assets_fn(
+        allocator, 
+        &player_2, 
+        &selector->player_2, 
+        position, (position->len - 1), &texture[1], &frames_slice[1], FLIP_LEFT);
+
+    *game_obj = (game_object_t){ 
+        .player_1 = player_1, 
+        .player_2 = player_2, 
+        .ground = ground};
 }
 #endif

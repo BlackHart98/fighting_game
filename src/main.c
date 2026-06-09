@@ -8,6 +8,7 @@
 #define ARRAY_LIST_IMPLEMENTATION
 #include "../lib/array_list.h"
 #include "../src/load_game_assets.h"
+#include "../src/renderer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,28 +17,41 @@ void
 compute_frame_orientation_fn(player_t *player);
 
 void
-update_fn(game_object_t *game_obj, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta);
-
-void
-draw_fn(game_object_t *game_obj, Vector2 *pos, Vector2 *vel);
-
-void
-player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
-
-void
-ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
+update_fn(
+    game_object_t *game_obj, 
+    position_soa_t *position_soa, 
+    const int screen_width, 
+    const int screen_height, 
+    float delta);
 
 
 void
-draw_character_fn(player_t *player, Vector2 *pos, int current_anim_group);
+player_action_fn(
+    player_t *player, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, 
+    const int screen_height);
 
 
 void
-player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height);
+ai_action_fn(
+    player_t *player, 
+    player_t *opponent, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, 
+    const int screen_height);
 
 
-void 
-draw_environment_fn(game_object_t *game_obj, Vector2 *pos);
+void
+player_tick_fn(
+    player_t *player, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, 
+    const int screen_height);
+
 
  
 int
@@ -45,31 +59,37 @@ main(void)
 {
     const int screen_width = 800;
     const int screen_height = 450;
-    player_t player_1 = {0};
-    player_t player_2 = {0};
-    ground_t ground = {0};
-    Vector2 pos[] = {START_POSITION_PLAYER_1, START_POSITION_PLAYER_2, START_POSITION_PLAYER_3};
-    Vector2 vel[] = {START_VELOCITY, START_VELOCITY};
 
     arena_allocator_t gpa = arena_allocator_init_page_default(c_allocator, MB(2));
     InitWindow(screen_width, screen_height, "fighting game");
     {
-        Texture2D texture = LoadTexture("assets/Ryu.gif");
-
-        slice_t frames_slice = make_slice(ryu_frames, sizeof(ryu_frames));
-        load_player_assets_fn(&gpa, &player_1, 0, 0, &texture, &frames_slice, FLIP_RIGHT);
-        load_player_assets_fn(&gpa, &player_2, 1, 1, &texture, &frames_slice, FLIP_LEFT);
-        load_ground_assets_fn(&ground, 2, screen_width, screen_height);
-        game_object_t vs = (game_object_t){ .player = (player_t[]){ player_1, player_2 }, .ground = ground};
+        game_object_t game_obj = (game_object_t){0};
+        position_soa_t position_soa = position_soa_init_capacity_fn(&gpa, 4);
+        load_game_assets_fn(
+            &gpa, &game_obj, &position_soa,
+            &(selector_t){
+                .environment = {0},
+                .player_1 = (player_selector_t){
+                    .character = RYU,
+                    .player_input = PLAYER,
+                },
+                .player_2 = (player_selector_t){
+                    .character = RYU,
+                    .player_input = AI,
+                }
+            },
+            screen_width, 
+            screen_height);
         SetTargetFPS(60); 
         while (!WindowShouldClose()) {
             float delta = GetFrameTime();
             // Update:
-            update_fn(&vs, pos, vel, screen_width, screen_height, delta);
+            update_fn(&game_obj, &position_soa, screen_width, screen_height, delta);
             // Render:
-            draw_fn(&vs, pos, vel);       
+            render_screen_fn(&game_obj, &position_soa);       
         }
-        UnloadTexture(texture);
+        UnloadTexture(game_obj.player_1.sprite.texture);
+        UnloadTexture(game_obj.player_2.sprite.texture);
     }
     CloseWindow();
 
@@ -81,7 +101,12 @@ main(void)
 
 
 void
-player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
+player_action_fn(
+    player_t *player, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, const 
+    int screen_height)
 {
     // Player Actions
     if (player->player_state){
@@ -116,10 +141,16 @@ player_action_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, cons
 
 
 void
-ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
+ai_action_fn(
+    player_t *player, 
+    player_t *opponent, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, 
+    const int screen_height)
 {
     if (player->player_state) {
-        float distance = pos[0].x - pos[1].x;
+        float distance = position_soa->x_pos[player->pos_idx] - position_soa->x_pos[opponent->pos_idx];
         // move towards player:
         if (-75 > distance) player->sprite.current_anim_group = MOVE;
         if (75 < distance) player->sprite.current_anim_group = MOVE;
@@ -128,45 +159,38 @@ ai_action_fn(player_t *player, player_t *opponent, Vector2 *pos, Vector2 *vel, f
 
 
 void
-update_fn(game_object_t *game_obj, Vector2 *pos, Vector2 *vel, const int screen_width, const int screen_height, float delta)
+update_fn(
+    game_object_t *game_obj, 
+    position_soa_t *position_soa, 
+    const int screen_width, 
+    const int screen_height, 
+    float delta)
 {
     // Fix issues with orientation
     // Player Actions
-    player_action_fn(&(game_obj->player[0]), pos, vel, delta, screen_width, screen_height);
-    // AI Actions
-    ai_action_fn(&(game_obj->player[1]), &(game_obj->player[0]), pos, vel, delta, screen_width, screen_height); 
+    player_action_fn(&(game_obj->player_1), position_soa, delta, screen_width, screen_height);
+    // // AI Actions
+    // ai_action_fn(&(game_obj->player_2), &(game_obj->player_1), position_soa, delta, screen_width, screen_height); 
 
-    for (int i = 0; i < 2; i++) {
-        player_tick_fn(&(game_obj->player[i]), pos, vel, delta, screen_width, screen_height);
-    }
+    player_tick_fn(&(game_obj->player_1), position_soa, delta, screen_width, screen_height);
+    player_tick_fn(&(game_obj->player_2), position_soa, delta, screen_width, screen_height);
+
 
     // Flip players
-    if (FLIP_RIGHT == game_obj->player[0].flip && (pos[game_obj->player[0].pos_idx].x > pos[game_obj->player[1].pos_idx].x + 50)) {
-        char flip = game_obj->player[0].flip;
-        game_obj->player[0].flip = game_obj->player[1].flip;
-        game_obj->player[1].flip = flip;
-    } else if (FLIP_RIGHT == game_obj->player[1].flip && (pos[game_obj->player[1].pos_idx].x > pos[game_obj->player[0].pos_idx].x + 50)) {
-        char flip = game_obj->player[0].flip;
-        game_obj->player[0].flip = game_obj->player[1].flip;
-        game_obj->player[1].flip = flip;
+    if (FLIP_RIGHT == game_obj->player_1.flip 
+        && (position_soa->x_pos[game_obj->player_1.pos_idx] > position_soa->x_pos[game_obj->player_2.pos_idx] + 50)
+    ) {
+        char flip = game_obj->player_1.flip;
+        game_obj->player_1.flip = game_obj->player_2.flip;
+        game_obj->player_2.flip = flip;
+    } else if (FLIP_RIGHT == game_obj->player_2.flip 
+        && (position_soa->x_pos[game_obj->player_2.pos_idx] > position_soa->x_pos[game_obj->player_1.pos_idx] + 50)
+    ) {
+        char flip = game_obj->player_1.flip;
+        game_obj->player_1.flip = game_obj->player_2.flip;
+        game_obj->player_2.flip = flip;
     }
 }
-
-
-void
-draw_fn(game_object_t *game_obj, Vector2 *pos, Vector2 *vel)
-{
-    BeginDrawing();
-    {
-        ClearBackground(RAYWHITE);
-        draw_environment_fn(game_obj, pos);
-        for (int i = 0; i < 2; i++) {
-            draw_character_fn(&(game_obj->player[i]), pos, game_obj->player[i].sprite.current_anim_group);
-        }
-    }
-    EndDrawing(); 
-}
-
 
 
 void
@@ -192,30 +216,12 @@ compute_frame_orientation_fn(player_t *player)
 
 
 void
-draw_character_fn(player_t *player, Vector2 *pos, int current_anim_group)
-{
-    int anim_group = player->sprite.current_anim_group;
-    DrawTextureRec(
-        player->sprite.texture, 
-        player->sprite.anim[anim_group].frame_rec[player->sprite.anim[anim_group].current_frame_idx], 
-        pos[player->pos_idx], WHITE);
-}
-
-
-void 
-draw_environment_fn(game_object_t *game_obj, Vector2 *pos)
-{
-    DrawRectangle(
-        pos[game_obj->ground.pos_idx].x, 
-        pos[game_obj->ground.pos_idx].y, 
-        game_obj->ground.width, 
-        game_obj->ground.height, 
-        BLACK);
-}
-
-
-void
-player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const int screen_width, const int screen_height)
+player_tick_fn(
+    player_t *player, 
+    position_soa_t *position_soa, 
+    float delta, 
+    const int screen_width, 
+    const int screen_height)
 {
     int anim_group = player->sprite.current_anim_group;
     player->sprite.anim[anim_group].elapsed_time += delta;
@@ -224,21 +230,25 @@ player_tick_fn(player_t *player, Vector2 *pos, Vector2 *vel, float delta, const 
     switch (anim_group) {
         case MOVE: {
             if (player->flip == FLIP_RIGHT){
-                pos[player->pos_idx].x += vel[player->vel_idx].x;
-                if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
+                position_soa->x_pos[player->pos_idx] += position_soa->x_vel[player->pos_idx];
+                if (position_soa->x_pos[player->pos_idx] >= screen_width - 50) 
+                    position_soa->x_pos[player->pos_idx] = screen_width - 50;
             } else {
-                pos[player->pos_idx].x -= vel[player->vel_idx].x;
-                if (pos[player->pos_idx].x <= 50) pos[player->pos_idx].x = 50;
+                position_soa->x_pos[player->pos_idx] -= position_soa->x_vel[player->pos_idx];
+                if (position_soa->x_pos[player->pos_idx] <= 50) 
+                    position_soa->x_pos[player->pos_idx] = 50;
             }
             break;
         } 
         case BACKOFF: {
             if (player->flip == FLIP_RIGHT){
-                pos[player->pos_idx].x -= vel[player->vel_idx].x;
-                if (pos[player->pos_idx].x <= 50) pos[player->pos_idx].x = 50;
+                position_soa->x_pos[player->pos_idx] -= position_soa->x_vel[player->pos_idx];
+                if (position_soa->x_pos[player->pos_idx] <= 50) 
+                    position_soa->x_pos[player->pos_idx] = 50;
             } else {
-                pos[player->pos_idx].x += vel[player->vel_idx].x;
-                if (pos[player->pos_idx].x >= screen_width - 50) pos[player->pos_idx].x = screen_width - 50;
+                position_soa->x_pos[player->pos_idx] += position_soa->x_vel[player->pos_idx];
+                if (position_soa->x_pos[player->pos_idx] >= screen_width - 50) 
+                    position_soa->x_pos[player->pos_idx] = screen_width - 50;
             }
             break;
         }

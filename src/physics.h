@@ -15,14 +15,18 @@ typedef struct position_soa_t {
     // velocity
     float *x_vel;
     float *y_vel;
+
+    // rigid body (rectangle)
+    float *width;
+    float *height;
 } position_soa_t;
 
 
 typedef struct position_t {
     float x_pos, y_pos, z_pos;
     float x_vel, y_vel;
+    float width, height;
 } position_t;
-
 
 
 position_soa_t 
@@ -38,7 +42,11 @@ position_soa_init_capacity_fn(arena_allocator_t *allocator, size_t init_capacity
     slice_t x_vel = arena_allocator_alloc_aligned(allocator, (init_capacity * sizeof(float)), sizeof(float), DEFAULT_ALIGNMENT);
     slice_t y_vel = arena_allocator_alloc_aligned(allocator, (init_capacity * sizeof(float)), sizeof(float), DEFAULT_ALIGNMENT);
     if(0 == x_vel.len_in_bytes || 0 == y_vel.len_in_bytes) return (position_soa_t){0};
-    
+
+    slice_t width = arena_allocator_alloc_aligned(allocator, (init_capacity * sizeof(float)), sizeof(float), DEFAULT_ALIGNMENT);
+    slice_t height = arena_allocator_alloc_aligned(allocator, (init_capacity * sizeof(float)), sizeof(float), DEFAULT_ALIGNMENT);
+    if(0 == width.len_in_bytes || 0 == height.len_in_bytes) return (position_soa_t){0};
+
     return (position_soa_t){
         .capacity = init_capacity,
         .len = 0,
@@ -48,10 +56,14 @@ position_soa_init_capacity_fn(arena_allocator_t *allocator, size_t init_capacity
 
         .x_vel = (float *)x_vel.ptr,
         .y_vel = (float *)y_vel.ptr,
+
+        .width = (float *)width.ptr,
+        .height = (float *)height.ptr,
     };
 }
 
 
+// This stuff has a bug in it
 int 
 position_soa_append_item_fn(arena_allocator_t *allocator, position_soa_t *dst, const position_t item)
 {
@@ -61,9 +73,14 @@ position_soa_append_item_fn(arena_allocator_t *allocator, position_soa_t *dst, c
     slice_t z_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->z_pos};
     if (0 == x_slice.len_in_bytes || 0 == y_slice.len_in_bytes || 0 == z_slice.len_in_bytes) return 1;
 
-    slice_t x_vel_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->x_pos};
-    slice_t y_vel_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->y_pos};
+    slice_t x_vel_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->x_vel};
+    slice_t y_vel_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->y_vel};
     if (0 == x_vel_slice.len_in_bytes || 0 == y_vel_slice.len_in_bytes) return 1;
+
+    slice_t width_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->width};
+    slice_t height_slice = (slice_t){.len_in_bytes = sizeof(float) * dst->capacity, .ptr = dst->height};
+    if (0 == width_slice.len_in_bytes || 0 == height_slice.len_in_bytes) return 1;
+
     if (dst->capacity * sizeof(float) < expected_len){
         x_slice = arena_allocator_resize_aligned(allocator, x_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
         y_slice = arena_allocator_resize_aligned(allocator, y_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
@@ -73,6 +90,11 @@ position_soa_append_item_fn(arena_allocator_t *allocator, position_soa_t *dst, c
         x_vel_slice = arena_allocator_resize_aligned(allocator, x_vel_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
         y_vel_slice = arena_allocator_resize_aligned(allocator, y_vel_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
         if(0 == x_vel_slice.len_in_bytes || 0 == y_vel_slice.len_in_bytes) return 1;
+
+        width_slice = arena_allocator_resize_aligned(allocator, width_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
+        height_slice = arena_allocator_resize_aligned(allocator, height_slice, expected_len << 1, sizeof(float), DEFAULT_ALIGNMENT);
+        if(0 == width_slice.len_in_bytes || 0 == height_slice.len_in_bytes) return 1;
+
         dst->capacity = (1 + dst->len) << 1;
     }
     memmove((void *)&(x_slice.ptr[dst->len * sizeof(float)]), (void *)&item.x_pos, sizeof(float));
@@ -82,13 +104,20 @@ position_soa_append_item_fn(arena_allocator_t *allocator, position_soa_t *dst, c
     memmove((void *)&(x_vel_slice.ptr[dst->len * sizeof(float)]), (void *)&item.x_vel, sizeof(float));
     memmove((void *)&(y_vel_slice.ptr[dst->len * sizeof(float)]), (void *)&item.y_vel, sizeof(float));
 
+    memmove((void *)&(width_slice.ptr[dst->len * sizeof(float)]), (void *)&item.width, sizeof(float));
+    memmove((void *)&(height_slice.ptr[dst->len * sizeof(float)]), (void *)&item.height, sizeof(float));
+
     dst->len += 1;
+
     dst->x_pos = (float *)x_slice.ptr;
     dst->y_pos = (float *)y_slice.ptr;
     dst->z_pos = (float *)z_slice.ptr;
 
     dst->x_vel = (float *)x_vel_slice.ptr;
     dst->y_vel = (float *)y_vel_slice.ptr;
+
+    dst->width = (float *)width_slice.ptr;
+    dst->height = (float *)height_slice.ptr;
     return 0;
 }
 
@@ -114,6 +143,9 @@ position_soa_get_position(const position_soa_t *dst, size_t index)
 
         .x_vel = dst->x_vel[index],
         .y_vel = dst->y_vel[index],
+
+        .height = dst->height[index],
+        .width = dst->width[index],
     };
 }
 #endif
